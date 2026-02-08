@@ -38,7 +38,16 @@ def sync_to_gs_via_script(table_name, df_custom=None):
         df = df_custom
     else:
         conn = get_connection()
-        df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
+        try:
+            df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
+        except:
+            # محاولة أخيرة لضمان وجود الجدول
+            from database import init_db
+            init_db()
+            try:
+                df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
+            except:
+                df = pd.DataFrame()
         conn.close()
     
     if df.empty:
@@ -814,6 +823,12 @@ elif menu == "📈 التقارير والإحصائيات":
                 try:
                     conn_local = get_connection()
                     c = conn_local.cursor()
+                    # التأكد من وجود الجدول قبل الإدخال
+                    c.execute('''CREATE TABLE IF NOT EXISTS reports (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        report_date TEXT,
+                        report_content TEXT
+                    )''')
                     report_date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
                     c.execute("INSERT INTO reports (report_date, report_content) VALUES (?, ?)", 
                               (report_date_str, report_text))
@@ -849,14 +864,23 @@ elif menu == "📈 التقارير والإحصائيات":
         st.subheader("📚 أرشيف التقارير السابقة")
         try:
             conn_local = get_connection()
+            # التأكد من وجود الجدول حتى لو لم يتم الحفظ بعد
+            c = conn_local.cursor()
+            c.execute('''CREATE TABLE IF NOT EXISTS reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_date TEXT,
+                report_content TEXT
+            )''')
+            conn_local.commit()
+            
             history_df = pd.read_sql("SELECT report_date as 'التاريخ', report_content as 'محتوى التقرير' FROM reports ORDER BY id DESC", conn_local)
             conn_local.close()
             if not history_df.empty:
                 st.dataframe(history_df, use_container_width=True)
             else:
                 st.info("لا توجد تقارير مؤرشفة حالياً. سيتم أرشفة التقارير عند الضغط على زر التصدير.")
-        except:
-            st.info("لم يتم العثور على سجلات سابقة.")
+        except Exception as e:
+            st.info(f"لم يتم العثور على سجلات سابقة.")
     else:
         st.info("لا توجد بيانات كافية لتوليد التقارير")
 
