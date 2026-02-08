@@ -540,35 +540,35 @@ elif menu == "👨‍👩‍👧‍👦 الشركاء وأولياء الأمو
     st.title("👨‍👩‍👧‍👦 إدارة الشركاء الاستراتيجيين")
     df_e = load_data("events")
     
-    if is_admin:
-        with st.expander("➕ تسجيل شريك جديد"):
-            with st.form("p_f"):
-                name = st.text_input("الاسم")
-                type_p = st.selectbox("مجال الشراكة", ["دعم تعليمي", "دعم مالي", "خبرات مهنية", "تطوع", "مبادرات"])
-                exp = st.text_input("المجال / الخبرة التخصصية")
-                level = st.selectbox("مستوى التفاعل المتوقع", ["مرتفع", "متوسط", "محدود"])
-                phone = st.text_input("رقم الهاتف")
-                if st.form_submit_button("إضافة شريك"):
-                    conn = get_connection()
-                    try:
+    # السماح للجميع (المسؤول والزوار) بتسجيل شريك جديد
+    with st.expander("➕ تسجيل شريك جديد"):
+        with st.form("p_f"):
+            name = st.text_input("الاسم")
+            type_p = st.selectbox("مجال الشراكة", ["دعم تعليمي", "دعم مالي", "خبرات مهنية", "تطوع", "مبادرات"])
+            exp = st.text_input("المجال / الخبرة التخصصية")
+            level = st.selectbox("مستوى التفاعل المتوقع", ["مرتفع", "متوسط", "محدود"])
+            phone = st.text_input("رقم الهاتف")
+            if st.form_submit_button("إضافة شريك"):
+                conn = get_connection()
+                try:
+                    conn.execute("INSERT INTO parents (name, participation_type, expertise, interaction_level, phone) VALUES (?,?,?,?,?)", (name, type_p, exp, level, phone))
+                    conn.commit()
+                except Exception as e:
+                    if "no column named phone" in str(e):
+                        conn.execute("ALTER TABLE parents ADD COLUMN phone TEXT")
+                        conn.commit()
                         conn.execute("INSERT INTO parents (name, participation_type, expertise, interaction_level, phone) VALUES (?,?,?,?,?)", (name, type_p, exp, level, phone))
                         conn.commit()
-                    except Exception as e:
-                        if "no column named phone" in str(e):
-                            conn.execute("ALTER TABLE parents ADD COLUMN phone TEXT")
-                            conn.commit()
-                            conn.execute("INSERT INTO parents (name, participation_type, expertise, interaction_level, phone) VALUES (?,?,?,?,?)", (name, type_p, exp, level, phone))
-                            conn.commit()
-                        else:
-                            st.error(f"خطأ: {e}")
-                    finally:
-                        conn.close()
-                    
-                    # مزامنة سحابية عبر الرابط الجديد
-                    sync_to_gs_via_script("parents")
-                    
-                    st.success("تم تسجيل الشريك بنجاح")
-                    st.rerun()
+                    else:
+                        st.error(f"خطأ: {e}")
+                finally:
+                    conn.close()
+                
+                # مزامنة سحابية عبر الرابط الجديد
+                sync_to_gs_via_script("parents")
+                
+                st.success("تم تسجيل الشريك بنجاح")
+                st.rerun()
 
     df_p = load_data("parents")
     if not df_p.empty:
