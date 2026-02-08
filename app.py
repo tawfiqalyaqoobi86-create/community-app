@@ -19,6 +19,9 @@ init_db()
 # --- وظائف المزامنة السحابية الجديدة ---
 def sync_to_gs_via_script(table_name):
     """مزامنة البيانات من القاعدة المحلية إلى جوجل شيت عبر Apps Script"""
+    if not SCRIPT_URL:
+        return False
+        
     tables_map = {
         "action_plan": ("ActionPlan", ["الهدف", "النشاط", "المسؤول", "الزمن", "KPI", "الأولوية", "نوع المهمة", "الحالة"]),
         "parents": ("Parents", ["الاسم", "النوع", "الخبرة", "التفاعل", "الهاتف"]),
@@ -30,12 +33,10 @@ def sync_to_gs_via_script(table_name):
     
     sheet_name, columns = tables_map[table_name]
     
-    # تحميل البيانات من القاعدة المحلية
     conn = get_connection()
     df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
     conn.close()
     
-    # تحويل البيانات إلى تنسيق يتناسب مع جوجل شيت
     if df.empty:
         rows = []
     else:
@@ -57,16 +58,15 @@ def sync_to_gs_via_script(table_name):
         }
         
         df_sync = df.rename(columns=mapping.get(table_name, {}))
-        # التأكد من وجود كافة الأعمدة المطلوبة
         for col in columns:
             if col not in df_sync.columns:
                 df_sync[col] = ""
         
-        # ترتيب الأعمدة وتحويل القيم لنصوص
         df_sync = df_sync[columns]
         rows = [[str(item) if item is not None else "" for item in row] for row in df_sync.values.tolist()]
 
     payload = {
+        "action": "update",
         "sheetName": sheet_name,
         "columns": columns,
         "rows": rows
@@ -76,10 +76,8 @@ def sync_to_gs_via_script(table_name):
         response = requests.post(SCRIPT_URL, json=payload, timeout=15)
         return response.status_code == 200
     except Exception as e:
-        st.sidebar.error(f"⚠️ فشل المزامنة السحابية لـ {table_name}: {e}")
         return False
 
-# --- نظام تسجيل الدخول ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_role = None
@@ -490,6 +488,12 @@ elif menu == "📅 خطة العمل":
                         if 'id' in row and not pd.isna(row['id']):
                             conn.execute("""UPDATE action_plan SET objective=?, activity=?, responsibility=?, timeframe=?, kpi=?, priority=?, status=?, task_type=? WHERE id=?""",
                                          (row['الهدف'], row['النشاط'], row['المسؤول'], str(row['الجدول الزمني']), row['مؤشر الأداء'], row['الأولوية'], row['الحالة'], row.get('نوع المهمة', 'معنوي'), row['id']))
+                        else:
+                            # إضافة بند جديد تم إدخاله عبر الجدول
+                            if row['الهدف'] or row['النشاط']:
+                                conn.execute("""INSERT INTO action_plan (objective, activity, responsibility, timeframe, kpi, priority, status, task_type) 
+                                               VALUES (?,?,?,?,?,?,?,?)""",
+                                             (row['الهدف'], row['النشاط'], row['المسؤول'], str(row['الجدول الزمني']), row['مؤشر الأداء'], row['الأولوية'], row.get('الحالة', 'قيد التنفيذ'), row.get('نوع المهمة', 'معنوي')))
                     conn.commit()
                 except Exception as e:
                     if "no column named task_type" in str(e):
@@ -499,6 +503,11 @@ elif menu == "📅 خطة العمل":
                             if 'id' in row and not pd.isna(row['id']):
                                 conn.execute("""UPDATE action_plan SET objective=?, activity=?, responsibility=?, timeframe=?, kpi=?, priority=?, status=?, task_type=? WHERE id=?""",
                                              (row['الهدف'], row['النشاط'], row['المسؤول'], str(row['الجدول الزمني']), row['مؤشر الأداء'], row['الأولوية'], row['الحالة'], row.get('نوع المهمة', 'معنوي'), row['id']))
+                            else:
+                                if row['الهدف'] or row['النشاط']:
+                                    conn.execute("""INSERT INTO action_plan (objective, activity, responsibility, timeframe, kpi, priority, status, task_type) 
+                                                   VALUES (?,?,?,?,?,?,?,?)""",
+                                                 (row['الهدف'], row['النشاط'], row['المسؤول'], str(row['الجدول الزمني']), row['مؤشر الأداء'], row['الأولوية'], row.get('الحالة', 'قيد التنفيذ'), row.get('نوع المهمة', 'معنوي')))
                         conn.commit()
                     else:
                         st.error(f"❌ خطأ في قاعدة البيانات: {e}")
@@ -617,6 +626,10 @@ elif menu == "👨‍👩‍👧‍👦 الشركاء وأولياء الأمو
                     if 'id' in row and not pd.isna(row['id']):
                         conn.execute("""UPDATE parents SET name=?, participation_type=?, expertise=?, interaction_level=?, phone=? WHERE id=?""",
                                      (row['الاسم'], row['نوع المشاركة'], row['الخبرة/المجال'], row['مستوى التفاعل'], row.get('رقم الهاتف', ''), row['id']))
+                    else:
+                        if row['الاسم']:
+                            conn.execute("""INSERT INTO parents (name, participation_type, expertise, interaction_level, phone) VALUES (?,?,?,?,?)""",
+                                         (row['الاسم'], row['نوع المشاركة'], row['الخبرة/المجال'], row['مستوى التفاعل'], row.get('رقم الهاتف', '')))
                 conn.commit(); conn.close()
                 
                 # مزامنة سحابية بعد الحفظ
@@ -733,6 +746,10 @@ elif menu == "🎭 الفعاليات والأنشطة":
                     if 'id' in row and not pd.isna(row['id']):
                         conn.execute("""UPDATE events SET name=?, date=?, location=?, attendees_count=?, rating=? WHERE id=?""",
                                      (row['الفعالية'], str(row['التاريخ']), row['المكان'], row['الحضور المتوقع'], row.get('التقييم', 0), row['id']))
+                    else:
+                        if row['الفعالية']:
+                            conn.execute("""INSERT INTO events (name, date, location, attendees_count, rating) VALUES (?,?,?,?,?)""",
+                                         (row['الفعالية'], str(row['التاريخ']), row['المكان'], row['الحضور المتوقع'], row.get('التقييم', 0)))
                 conn.commit(); conn.close()
                 
                 # مزامنة سحابية بعد الحفظ عبر الرابط الجديد
