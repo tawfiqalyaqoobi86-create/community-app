@@ -11,7 +11,7 @@ from streamlit_gsheets import GSheetsConnection
 SCRIPT_URL = st.secrets.get("script_url", "")
 
 # إعدادات الصفحة
-st.set_page_config(page_title="مساعد مشرف تنمية العلاقات المجتمعية", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="مشرف تنمية العلاقات المجتمعية", layout="wide", initial_sidebar_state="auto")
 
 # تهيئة قاعدة البيانات المحلية
 init_db()
