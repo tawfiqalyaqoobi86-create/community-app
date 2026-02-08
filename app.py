@@ -170,6 +170,11 @@ st.markdown("""
         color: #ecf0f1 !important;
     }
 
+    /* لون نص الإدخال في القائمة الجانبية */
+    section[data-testid="stSidebar"] input {
+        color: #1a2a6c !important;
+    }
+
     /* تصميم البطاقات */
     div[data-testid="metric-container"] {
         background-color: white;
