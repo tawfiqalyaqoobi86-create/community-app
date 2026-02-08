@@ -62,12 +62,18 @@ def sync_to_gs_via_script(table_name, df_custom=None):
         }
         
         df_sync = df.rename(columns=mapping.get(table_name, {}))
+        
+        # تحويل أي أعمدة تحتوي على تواريخ إلى نصوص لضمان ظهورها بشكل صحيح في جوجل شيت
+        for col in df_sync.columns:
+            if df_sync[col].dtype == 'datetime64[ns]' or 'تاريخ' in col or 'الزمن' in col or 'التاريخ' in col:
+                df_sync[col] = df_sync[col].astype(str)
+                
         for col in columns:
             if col not in df_sync.columns:
                 df_sync[col] = ""
         
         df_sync = df_sync[columns]
-        rows = [[str(item) if item is not None else "" for item in row] for row in df_sync.values.tolist()]
+        rows = [[str(item) if item is not None and str(item) != 'NaT' else "" for item in row] for row in df_sync.values.tolist()]
 
     payload = {
         "action": "append" if table_name == "reports" else "update",
