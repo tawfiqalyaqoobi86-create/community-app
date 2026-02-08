@@ -17,7 +17,7 @@ st.set_page_config(page_title="مساعد مشرف تنمية العلاقات �
 init_db()
 
 # --- وظائف المزامنة السحابية الجديدة ---
-def sync_to_gs_via_script(table_name):
+def sync_to_gs_via_script(table_name, df_custom=None):
     """مزامنة البيانات من القاعدة المحلية إلى جوجل شيت عبر Apps Script"""
     if not SCRIPT_URL:
         return False
@@ -25,7 +25,8 @@ def sync_to_gs_via_script(table_name):
     tables_map = {
         "action_plan": ("ActionPlan", ["الهدف", "النشاط", "المسؤول", "الزمن", "KPI", "الأولوية", "نوع المهمة", "الحالة"]),
         "parents": ("Parents", ["الاسم", "النوع", "الخبرة", "التفاعل", "الهاتف"]),
-        "events": ("Events", ["الفعالية", "التاريخ", "المكان", "الحضور"])
+        "events": ("Events", ["الفعالية", "التاريخ", "المكان", "الحضور"]),
+        "reports": ("Reports", ["التاريخ", "نص التقرير"])
     }
     
     if table_name not in tables_map:
@@ -33,9 +34,12 @@ def sync_to_gs_via_script(table_name):
     
     sheet_name, columns = tables_map[table_name]
     
-    conn = get_connection()
-    df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
-    conn.close()
+    if df_custom is not None:
+        df = df_custom
+    else:
+        conn = get_connection()
+        df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
+        conn.close()
     
     if df.empty:
         rows = []
@@ -66,7 +70,7 @@ def sync_to_gs_via_script(table_name):
         rows = [[str(item) if item is not None else "" for item in row] for row in df_sync.values.tolist()]
 
     payload = {
-        "action": "update",
+        "action": "append" if table_name == "reports" else "update",
         "sheetName": sheet_name,
         "columns": columns,
         "rows": rows
@@ -600,7 +604,7 @@ elif menu == "👨‍👩‍👧‍👦 الشركاء وأولياء الأمو
                 num_rows="dynamic",
                 column_config={
                     "id": st.column_config.NumberColumn("ID", disabled=True),
-                    "واتساب الذكي": st.column_config.LinkColumn("🤖 مراسلة ذكية", display_text="إرسال شكر ذكي")
+                    "واتساب الذكي": st.column_config.LinkColumn("🤖 مراسلة ذكية", display_text="رسالة شكر")
                 }
             )
             
@@ -656,7 +660,7 @@ elif menu == "👨‍👩‍👧‍👦 الشركاء وأولياء الأمو
                     message = f"السلام عليكم ورحمة الله وبركاته الأستاذ {name}، نتقدم لكم بخالص الشكر لمساهمتكم في ({p_type}).\n\nأ . توفيق اليعقوبي (مشرف تنمية علاقات مجتمعية)"
                     encoded_msg = message.replace(' ', '%20').replace('\n', '%0A')
                     wa_url = f"https://api.whatsapp.com/send?phone={clean_p}&text={encoded_msg}"
-                    cl1.markdown(f"[🤖 إرسال شكر ذكي]({wa_url})")
+                    cl1.markdown(f"[🤖 رسالة شكر]({wa_url})")
                 
                 if not df_e.empty and 'name' in df_e.columns:
                     linked = df_e[df_e['name'].str.contains(row['name'], na=False)]
@@ -779,37 +783,45 @@ elif menu == "📈 التقارير والإحصائيات":
         
         st.divider()
         if st.button("📤 تصدير ملخص التقارير إلى Google Sheets"):
-            if conn_gs:
-                try:
-                    # تجهيز النص الموحد للتقرير كما طلب المستخدم
-                    report_text = f"""تقرير دوري: مشرف تنمية العلاقات المجتمعية
+            try:
+                # تجهيز النص الموحد للتقرير كما طلب المستخدم
+                report_text = f"""تقرير دوري: مشرف تنمية العلاقات المجتمعية
 التاريخ: {datetime.now().strftime('%Y-%m-%d')}
 ------------------------------------------
 1. ملخص الإنجاز: تم تنفيذ {len(df_e)} عملية/فعالية.
 2. حالة أولياء الأمور: يوجد {len(df_p)} ولي أمر مسجل.
 3. التوصيات: الاستمرار في تعزيز التواصل الرقمي.
 ------------------------------------------"""
-                    
-                    # تجهيز البيانات للإرسال
-                    report_data = pd.DataFrame([{
-                        "التاريخ": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "نص التقرير": report_text
-                    }])
-                    
-                    try:
-                        existing_reports = conn_gs.read(worksheet="Reports", ttl=0)
-                        existing_reports = existing_reports.dropna(how='all')
-                        updated_reports = pd.concat([existing_reports, report_data], ignore_index=True)
-                    except:
-                        updated_reports = report_data
-                    
-                    conn_gs.update(worksheet="Reports", data=updated_reports)
-                    st.success("✅ تم تصدير التقرير النصي بنجاح")
+                
+                # تجهيز البيانات للإرسال
+                report_data = pd.DataFrame([{
+                    "التاريخ": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "نص التقرير": report_text
+                }])
+                
+                # محاولة المزامنة عبر Apps Script (أكثر استقراراً للحفظ)
+                if sync_to_gs_via_script("reports", df_custom=report_data):
+                    st.success("✅ تم تصدير التقرير النصي بنجاح سحابياً")
                     st.text_area("معاينة التقرير المرسل:", report_text, height=200)
-                except Exception as e:
-                    st.error(f"❌ فشل التصدير: {e}")
-            else:
-                st.error("❌ الاتصال بـ Google Sheets غير مفعل.")
+                elif conn_gs:
+                    # محاولة بديلة عبر gsheets connection إذا فشل السكريبت
+                    try:
+                        try:
+                            existing_reports = conn_gs.read(worksheet="Reports", ttl=0)
+                            existing_reports = existing_reports.dropna(how='all')
+                            updated_reports = pd.concat([existing_reports, report_data], ignore_index=True)
+                        except:
+                            updated_reports = report_data
+                        
+                        conn_gs.update(worksheet="Reports", data=updated_reports)
+                        st.success("✅ تم تصدير التقرير بنجاح (عبر الربط المباشر)")
+                        st.text_area("معاينة التقرير المرسل:", report_text, height=200)
+                    except Exception as e:
+                        st.error(f"❌ فشل التصدير المباشر: {e}")
+                else:
+                    st.error("❌ فشل التصدير سحابياً. يرجى التأكد من اتصال الإنترنت.")
+            except Exception as e:
+                st.error(f"❌ خطأ غير متوقع: {e}")
     else:
         st.info("لا توجد بيانات كافية لتوليد التقارير")
 
