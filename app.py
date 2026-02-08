@@ -58,6 +58,9 @@ def sync_to_gs_via_script(table_name, df_custom=None):
             "events": {
                 "name": "الفعالية", "date": "التاريخ", 
                 "location": "المكان", "attendees_count": "الحضور"
+            },
+            "reports": {
+                "report_date": "التاريخ", "report_content": "نص التقرير"
             }
         }
         
@@ -76,7 +79,7 @@ def sync_to_gs_via_script(table_name, df_custom=None):
         rows = [[str(item) if item is not None and str(item) != 'NaT' else "" for item in row] for row in df_sync.values.tolist()]
 
     payload = {
-        "action": "append" if table_name == "reports" else "update",
+        "action": "update",
         "sheetName": sheet_name,
         "columns": columns,
         "rows": rows
@@ -804,35 +807,53 @@ elif menu == "📈 التقارير والإحصائيات":
 3. التوصيات: الاستمرار في تعزيز التواصل الرقمي.
 ------------------------------------------"""
                 
-                # تجهيز البيانات للإرسال
-                report_data = pd.DataFrame([{
-                    "التاريخ": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "نص التقرير": report_text
-                }])
-                
-                # محاولة المزامنة عبر Apps Script (أكثر استقراراً للحفظ)
-                if sync_to_gs_via_script("reports", df_custom=report_data):
-                    st.success("✅ تم تصدير التقرير النصي بنجاح سحابياً")
-                    st.text_area("معاينة التقرير المرسل:", report_text, height=200)
+                # 1. حفظ التقرير في قاعدة البيانات المحلية أولاً لضمان الأرشفة
+                try:
+                    conn_local = get_connection()
+                    c = conn_local.cursor()
+                    report_date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    c.execute("INSERT INTO reports (report_date, report_content) VALUES (?, ?)", 
+                              (report_date_str, report_text))
+                    conn_local.commit()
+                    conn_local.close()
+                except Exception as db_err:
+                    st.error(f"⚠️ فشل الحفظ المحلي: {db_err}")
+
+                # 2. مزامنة جميع التقارير (بما فيها التاريخية) إلى جوجل شيت
+                # هذا يضمن ظهور كل تقرير في صف مستقل وعدم ضياع التقارير السابقة
+                if sync_to_gs_via_script("reports"):
+                    st.success("✅ تم حفظ التقرير وتحديث الأرشيف في Google Sheets بنجاح")
+                    st.text_area("معاينة التقرير الحالي:", report_text, height=200)
                 elif conn_gs:
                     # محاولة بديلة عبر gsheets connection إذا فشل السكريبت
                     try:
-                        try:
-                            existing_reports = conn_gs.read(worksheet="Reports", ttl=0)
-                            existing_reports = existing_reports.dropna(how='all')
-                            updated_reports = pd.concat([existing_reports, report_data], ignore_index=True)
-                        except:
-                            updated_reports = report_data
+                        conn_local = get_connection()
+                        all_reports = pd.read_sql("SELECT report_date as 'التاريخ', report_content as 'نص التقرير' FROM reports", conn_local)
+                        conn_local.close()
                         
-                        conn_gs.update(worksheet="Reports", data=updated_reports)
-                        st.success("✅ تم تصدير التقرير بنجاح (عبر الربط المباشر)")
-                        st.text_area("معاينة التقرير المرسل:", report_text, height=200)
+                        conn_gs.update(worksheet="Reports", data=all_reports)
+                        st.success("✅ تم تحديث أرشيف التقارير بنجاح (عبر الربط المباشر)")
+                        st.text_area("معاينة التقرير الحالي:", report_text, height=200)
                     except Exception as e:
                         st.error(f"❌ فشل التصدير المباشر: {e}")
                 else:
-                    st.error("❌ فشل التصدير سحابياً. يرجى التأكد من اتصال الإنترنت.")
+                    st.error("❌ فشل المزامنة سحابياً. يرجى التأكد من اتصال الإنترنت.")
             except Exception as e:
                 st.error(f"❌ خطأ غير متوقع: {e}")
+        
+        # عرض أرشيف التقارير المحفوظة
+        st.divider()
+        st.subheader("📚 أرشيف التقارير السابقة")
+        try:
+            conn_local = get_connection()
+            history_df = pd.read_sql("SELECT report_date as 'التاريخ', report_content as 'محتوى التقرير' FROM reports ORDER BY id DESC", conn_local)
+            conn_local.close()
+            if not history_df.empty:
+                st.dataframe(history_df, use_container_width=True)
+            else:
+                st.info("لا توجد تقارير مؤرشفة حالياً. سيتم أرشفة التقارير عند الضغط على زر التصدير.")
+        except:
+            st.info("لم يتم العثور على سجلات سابقة.")
     else:
         st.info("لا توجد بيانات كافية لتوليد التقارير")
 
