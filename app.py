@@ -264,6 +264,9 @@ def sync_data_from_gs():
         "events": ("Events", {
             "الفعالية": "name", "التاريخ": "date", 
             "المكان": "location", "الحضور": "attendees_count"
+        }),
+        "reports": ("Reports", {
+            "التاريخ": "report_date", "نص التقرير": "report_content"
         })
     }
     
