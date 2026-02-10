@@ -371,18 +371,23 @@ if st.sidebar.button("📥 مزامنة من السحابة"):
 if st.sidebar.button("📤 مزامنة إلى السحابة"):
     with st.spinner("جاري رفع البيانات..."):
         success = True
+        conn = get_connection()
         for table in ["action_plan", "parents", "events", "reports"]:
-            # منع مسح البيانات السحابية إذا كانت القاعدة المحلية فارغة تماماً
-            conn = get_connection()
-            count = pd.read_sql(f"SELECT COUNT(*) as count FROM {table}", conn).iloc[0]['count']
-            conn.close()
-            
-            if count > 0:
-                if not sync_to_gs_via_script(table):
-                    success = False
-                    st.sidebar.error(f"فشلت مزامنة {table}")
-            else:
-                st.sidebar.info(f"تخطي {table} لأنها فارغة محلياً")
+            try:
+                # منع مسح البيانات السحابية إذا كانت القاعدة المحلية فارغة تماماً
+                count_df = pd.read_sql(f"SELECT COUNT(*) as count FROM {table}", conn)
+                count = count_df.iloc[0]['count'] if not count_df.empty else 0
+                
+                if count > 0:
+                    if not sync_to_gs_via_script(table):
+                        success = False
+                        st.sidebar.error(f"فشلت مزامنة {table}")
+                else:
+                    st.sidebar.info(f"تخطي {table} لأنها فارغة محلياً")
+            except Exception as e:
+                st.sidebar.error(f"⚠️ خطأ في قراءة الجدول {table}")
+                success = False
+        conn.close()
         if success:
             st.sidebar.success("تمت المزامنة بالكامل")
 
