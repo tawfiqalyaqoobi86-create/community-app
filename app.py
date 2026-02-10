@@ -255,7 +255,7 @@ def load_data(table):
         
     return df
 
-def sync_data_from_gs():
+def sync_data_from_gs(force=False):
     if not conn_gs:
         return
     
@@ -263,7 +263,7 @@ def sync_data_from_gs():
         "action_plan": ("ActionPlan", {
             "الهدف": "objective", "النشاط": "activity", "المسؤول": "responsibility", 
             "الزمن": "timeframe", "KPI": "kpi", "الأولوية": "priority", 
-            "النوع": "task_type", "الحالة": "status"
+            "نوع المهمة": "task_type", "الحالة": "status"
         }),
         "parents": ("Parents", {
             "الاسم": "name", "النوع": "participation_type", 
@@ -282,19 +282,19 @@ def sync_data_from_gs():
     conn = get_connection()
     for table, (ws, mapping) in tables_map.items():
         try:
-            # التحقق إذا كان الجدول فارغاً
+            # التحقق إذا كان الجدول فارغاً أو إذا كان هناك طلب مزامنة قسرية
             local_count = pd.read_sql(f"SELECT COUNT(*) as count FROM {table}", conn).iloc[0]['count']
-            if local_count == 0:
+            if local_count == 0 or force:
                 gs_df = conn_gs.read(worksheet=ws, ttl=0)
                 if not gs_df.empty:
                     gs_df = gs_df.dropna(how='all')
-                    # إعادة تسمية الأعمدة للمطابقة مع قاعدة البيانات
                     to_insert = gs_df.rename(columns=mapping)
-                    # الاحتفاظ فقط بالأعمدة الموجودة في الجدول
                     cols = list(mapping.values())
                     to_insert = to_insert[[c for c in cols if c in to_insert.columns]]
                     
                     if not to_insert.empty:
+                        if force:
+                            conn.execute(f"DELETE FROM {table}")
                         to_insert.to_sql(table, conn, if_exists='append', index=False)
         except Exception as e:
             st.sidebar.warning(f"⚠️ فشل مزامنة {table}: {e}")
@@ -359,6 +359,32 @@ menu = st.sidebar.radio(
         "🤖 الذكاء الاصطناعي"
     ]
 )
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔄 حالة البيانات")
+if st.sidebar.button("📥 مزامنة من السحابة"):
+    with st.spinner("جاري استيراد البيانات من Google Sheets..."):
+        sync_data_from_gs(force=True)
+        st.success("تمت المزامنة بنجاح")
+        st.rerun()
+
+if st.sidebar.button("📤 مزامنة إلى السحابة"):
+    with st.spinner("جاري رفع البيانات..."):
+        success = True
+        for table in ["action_plan", "parents", "events", "reports"]:
+            # منع مسح البيانات السحابية إذا كانت القاعدة المحلية فارغة تماماً
+            conn = get_connection()
+            count = pd.read_sql(f"SELECT COUNT(*) as count FROM {table}", conn).iloc[0]['count']
+            conn.close()
+            
+            if count > 0:
+                if not sync_to_gs_via_script(table):
+                    success = False
+                    st.sidebar.error(f"فشلت مزامنة {table}")
+            else:
+                st.sidebar.info(f"تخطي {table} لأنها فارغة محلياً")
+        if success:
+            st.sidebar.success("تمت المزامنة بالكامل")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("<p style='text-align:center; color:#95a5a6; font-size:0.7rem;'>تطوير: توفيق اليعقوبي</p>", unsafe_allow_html=True)
@@ -484,6 +510,11 @@ elif menu == "📅 خطة العمل":
         
         if is_admin:
             display_pl['حذف'] = False
+            
+            # تنبيه بوجود تغييرات غير محفوظة
+            if st.session_state.get("plan_edit") and (st.session_state.plan_edit.get("edited_rows") or st.session_state.plan_edit.get("added_rows") or st.session_state.plan_edit.get("deleted_rows")):
+                st.warning("⚠️ لديك تعديلات غير محفوظة في الجدول أدناه. يرجى الضغط على زر 'حفظ كافة التعديلات' لحفظها.")
+
             edited_df = st.data_editor(
                 display_pl, 
                 key="plan_edit", 
@@ -623,6 +654,11 @@ elif menu == "👨‍👩‍👧‍👦 الشركاء وأولياء الأمو
         if is_admin:
             display_p['واتساب الذكي'] = display_p.apply(make_ai_whatsapp_link, axis=1)
             display_p['حذف'] = False
+            
+            # تنبيه بوجود تغييرات غير محفوظة
+            if st.session_state.get("p_edit") and (st.session_state.p_edit.get("edited_rows") or st.session_state.p_edit.get("added_rows") or st.session_state.p_edit.get("deleted_rows")):
+                st.warning("⚠️ لديك تعديلات غير محفوظة في الجدول أدناه. يرجى الضغط على زر 'حفظ تعديلات الشركاء' لحفظها.")
+
             edited_p = st.data_editor(
                 display_p, 
                 key="p_edit", 
@@ -747,6 +783,11 @@ elif menu == "🎭 الفعاليات والأنشطة":
         
         if is_admin:
             display_df['حذف'] = False
+            
+            # تنبيه بوجود تغييرات غير محفوظة
+            if st.session_state.get("e_edit") and (st.session_state.e_edit.get("edited_rows") or st.session_state.e_edit.get("added_rows") or st.session_state.e_edit.get("deleted_rows")):
+                st.warning("⚠️ لديك تعديلات غير محفوظة في الجدول أدناه. يرجى الضغط على زر 'حفظ تعديلات الفعاليات' (إذا توفر) أو الحذف المباشر.")
+
             edited_e = st.data_editor(
                 display_df, 
                 key="e_edit", 
